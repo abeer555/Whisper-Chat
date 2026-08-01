@@ -40,5 +40,14 @@
         removePresenceUser(username);
         typingUsers.delete(username);
         renderTypingIndicator();
-        if (callState.peer === username) endCall(true); // abort call if peer left
+        // callState lives in calls.js which loads AFTER this file. Guard the
+        // dereference so a user_left frame arriving before calls.js has run
+        // (rare but possible during boot) doesn't throw a ReferenceError.
+        if (
+          typeof callState !== "undefined" &&
+          callState.peer === username &&
+          typeof endCall === "function"
+        ) {
+          endCall(true);
+        }
       }

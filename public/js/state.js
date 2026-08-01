@@ -20,7 +20,14 @@
       // ── Outbound message queue ──
       // Messages the user tried to send while the socket was down. Flushed
       // in-order on the next successful reconnect so nothing is silently lost.
+      // IMPORTANT: scope is per-session. Leave/join must clear this, otherwise
+      // a queue built against room X will be flushed into room Y.
       const outboxQueue = [];
+
+      // ── Per-page-load session identifier ──
+      // Stamped onto every outgoing msgId so an ack from a previous page-load
+      // (or a ghost reconnect) can't accidentally flip a tick on a fresh send.
+      const sessionId = Math.random().toString(36).slice(2, 10);
 
       // ── Presence ──
       const onlineUsers = new Map(); // username → { online, el }

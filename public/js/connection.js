@@ -29,14 +29,24 @@
             // and gives the link a self-heal deadline if it dies silently.
             clearInterval(pingTimer);
             clearTimeout(pongTimeout);
+            pongTimeout = null;
             pingTimer = setInterval(() => {
-              if (ws && ws.readyState === WebSocket.OPEN) {
+              if (!ws || ws.readyState !== WebSocket.OPEN) return;
+              // Don't stack another ping while one's still unanswered —
+              // otherwise every 25 s tick would arm a new 15 s kill-timer
+              // even when the link is just slow, and we'd close healthy sockets.
+              if (pongTimeout) return;
+              try {
                 ws.send(JSON.stringify({ type: "ping" }));
-                clearTimeout(pongTimeout);
-                pongTimeout = setTimeout(() => {
-                  if (isChatActive && ws) { try { ws.close(); } catch (_) {} }
-                }, 15_000);
+              } catch (err) {
+                console.warn("[conn] ping send failed:", err);
+                return;
               }
+              pongTimeout = setTimeout(() => {
+                console.warn("[conn] no pong in 15s — assuming dead, closing");
+                pongTimeout = null;
+                if (isChatActive && ws) { try { ws.close(); } catch (_) {} }
+              }, 15_000);
             }, 25_000);
             // Flush anything that was queued while the socket was down.
             flushOutboxQueue();
@@ -47,8 +57,19 @@
             if (socket !== ws) return; // stale socket
             clearTimeout(pongTimeout);
             pongTimeout = null;
+            let data;
             try {
-              const data = JSON.parse(event.data);
+              data = JSON.parse(event.data);
+            } catch (err) {
+              console.error("[conn] frame is not valid JSON:", event.data, err);
+              return;
+            }
+            // Surface every incoming frame while diagnosing why chat messages
+            // don't render. Remove the chat filter once the bug is found.
+            if (data.type === "chat") {
+              console.log("[conn] ← chat from", data.username, JSON.stringify(data));
+            }
+            try {
               switch (data.type) {
                 case "room_state":
                   data.users.forEach((u) => addPresenceUser(u, true));
@@ -58,16 +79,20 @@
                   break;
                 case "user_left":
                   handleUserLeft(data.username);
-                  removePresenceUser(data.username);
-                  typingUsers.delete(data.username);
-                  renderTypingIndicator();
                   break;
                 case "chat":
                   handleReceiveMessage(data.username, data.text, data.replyTo || null, data.msgId || null);
                   break;
                 case "msg_ack": {
                   const el = pendingTicks.get(data.msgId);
-                  if (el && !el.classList.contains("delivered")) el.textContent = "✓";
+                  if (el && !el.classList.contains("delivered")) {
+                    el.textContent = "✓";
+                  } else if (!el) {
+                    // Ack arrived for a msgId we have no record of — usually
+                    // means pendingTicks was cleared (leaveChat / reconnect)
+                    // while the ack was in flight.
+                    console.debug("[conn] ack for unknown msgId:", data.msgId);
+                  }
                   break;
                 }
                 case "msg_delivered": {
@@ -116,8 +141,14 @@
                 case "call_ended":
                   endCall(true);
                   break;
+                default:
+                  console.warn("[conn] unhandled frame type:", data.type);
               }
-            } catch (_) {}
+            } catch (err) {
+              // Previously this was a bare catch that hid all errors. Surface
+              // them — this is exactly where chat frames go to die silently.
+              console.error("[conn] handler threw for type=", data.type, err);
+            }
           };
 
           socket.onclose = () => {
@@ -187,15 +218,24 @@
       // Drain anything staged while the socket was dead.
       function flushOutboxQueue() {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        let flushed = 0;
         while (outboxQueue.length > 0) {
           const msg = outboxQueue.shift();
           try {
             ws.send(JSON.stringify(msg));
+            flushed++;
           } catch (err) {
             // Push it back to the front and stop — we'll try again on next open.
             outboxQueue.unshift(msg);
+            console.warn(
+              `[conn] outbox flush failed after ${flushed} msg(s):`,
+              err,
+            );
             return;
           }
+        }
+        if (flushed > 0) {
+          console.log(`[conn] flushed ${flushed} queued msg(s)`);
         }
       }
 

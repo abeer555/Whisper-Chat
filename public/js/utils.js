@@ -6,10 +6,11 @@
         return d.innerHTML;
       }
       function scrollToBottom() {
-        chatMessages.scrollTo({
-          top: chatMessages.scrollHeight,
-          behavior: "smooth",
-        });
+        // Use scrollTop, not scrollTo({behavior:"smooth"}). Smooth scrolling
+        // can silently no-op when called outside a user gesture (e.g. from a
+        // WebSocket onmessage handler), leaving newly-arrived messages
+        // rendered but invisible below the fold.
+        chatMessages.scrollTop = chatMessages.scrollHeight;
       }
       function getTimeString() {
         return new Date().toLocaleTimeString([], {
@@ -23,5 +24,15 @@
         return `${(bytes / 1048576).toFixed(1)} MB`;
       }
       function genMsgId() {
-        return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        // Combine sessionId (globally-unique per page load) with a monotonic
+        // counter and a wall-clock stamp. Prevents cross-session ack collisions
+        // and stays lexicographically sortable for a given sender.
+        genMsgId._n = (genMsgId._n || 0) + 1;
+        return (
+          sessionId +
+          "-" +
+          Date.now().toString(36) +
+          "-" +
+          genMsgId._n.toString(36)
+        );
       }

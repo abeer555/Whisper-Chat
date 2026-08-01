@@ -31,6 +31,7 @@
           messageInput.focus();
           chatMessages.innerHTML = "";
           pendingTicks.clear(); // fresh room — drop any stale receipt handles
+          outboxQueue.length = 0; // never flush one room's queue into another
           renderDateDivider();
           renderWelcomeCard(currentChannel, currentUser);
           addPresenceUser(currentUser, true);
@@ -98,6 +99,7 @@
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
         pendingTicks.clear();
+        outboxQueue.length = 0; // don't leak queued msgs into the next room
 
         if (ws) {
           ws.onclose = null;

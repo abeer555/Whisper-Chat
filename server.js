@@ -33,8 +33,16 @@ function broadcast(roomKey, data, exclude) {
   const room = rooms.get(roomKey);
   if (!room) return;
   const msg = JSON.stringify(data);
-  for (const [ws] of room) {
-    if (ws !== exclude && ws.readyState === 1) ws.send(msg);
+  const type = data && data.type ? data.type : "?";
+  for (const [ws, info] of room) {
+    if (ws === exclude) continue;
+    if (ws.readyState === 1) {
+      ws.send(msg);
+    } else {
+      console.warn(
+        `[drop] ${type} → ${info && info.username} (readyState=${ws.readyState})`,
+      );
+    }
   }
 }
 
@@ -44,9 +52,23 @@ function broadcast(roomKey, data, exclude) {
  */
 function sendToUser(roomKey, senderName, targetName, data) {
   const umap = usernameMap.get(roomKey);
-  if (!umap) return;
+  if (!umap) {
+    console.warn(`[drop] ${data.type} from ${senderName} → ${targetName}: no room`);
+    return;
+  }
   const target = umap.get(targetName);
-  if (!target || target.readyState !== 1) return;
+  if (!target) {
+    console.warn(
+      `[drop] ${data.type} from ${senderName} → ${targetName}: user not in room`,
+    );
+    return;
+  }
+  if (target.readyState !== 1) {
+    console.warn(
+      `[drop] ${data.type} from ${senderName} → ${targetName}: readyState=${target.readyState}`,
+    );
+    return;
+  }
   target.send(JSON.stringify({ ...data, from: senderName }));
 }
 
@@ -185,6 +207,10 @@ wss.on("connection", (ws, req) => {
 
       // Chat: broadcast to everyone else in the room, then ACK back to sender
       if (msg.type === "chat") {
+        const preview = typeof msg.text === "string" ? msg.text.slice(0, 60) : "";
+        console.log(
+          `[msg] ${username} @ ${roomKey.slice(0, 8)}…: "${preview}" (id=${msg.msgId || "-"})`,
+        );
         broadcast(roomKey, { type: "chat", username, text: msg.text, replyTo: msg.replyTo || null, msgId: msg.msgId }, ws);
 
         // ACK the sender so the client can render a single ✓ (server received it).
@@ -197,10 +223,11 @@ wss.on("connection", (ws, req) => {
       // Delivery receipt: a recipient tells the room they've rendered msgId.
       // Relay to the original sender so their UI can flip ✓ → ✓✓.
       if (msg.type === "msg_delivered" && msg.msgId && msg.to) {
+        // The client must not be allowed to forge `from`; the server injects it.
+        const { from: _ignored, ...rest } = msg;
         sendToUser(roomKey, username, msg.to, {
           type: "msg_delivered",
           msgId: msg.msgId,
-          from: username,
         });
         return;
       }
