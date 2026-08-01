@@ -54,21 +54,52 @@ function sendToUser(roomKey, senderName, targetName, data) {
 
 const PORT = process.env.PORT || 3000;
 
+const MIME_TYPES = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+};
+
+function serveFile(res, absPath) {
+  fs.readFile(absPath, (err, data) => {
+    if (err) {
+      res.writeHead(err.code === "ENOENT" ? 404 : 500);
+      res.end(err.code === "ENOENT" ? "Not Found" : "Error");
+      return;
+    }
+    const type = MIME_TYPES[path.extname(absPath).toLowerCase()] || "application/octet-stream";
+    res.writeHead(200, { "Content-Type": type });
+    res.end(data);
+  });
+}
+
 const server = http.createServer((req, res) => {
-  // Serve the chat HTML
-  if (req.url === "/" || req.url === "/index.html") {
-    const filePath = path.join(__dirname, "index.html");
-    fs.readFile(filePath, (err, data) => {
-      if (err) {
-        res.writeHead(500);
-        res.end("Error");
-        return;
-      }
-      res.writeHead(200, { "Content-Type": "text/html" });
-      res.end(data);
-    });
-    return;
+  const url = req.url.split("?")[0];
+
+  // Serve the chat HTML at the root (kept alongside server.js, not in /public)
+  if (url === "/" || url === "/index.html") {
+    return serveFile(res, path.join(__dirname, "index.html"));
   }
+
+  // Static assets: /css/* /js/* load from /public (path-traversal safe)
+  if (url.startsWith("/css/") || url.startsWith("/js/")) {
+    const rel = url.replace(/^\/+/, "");
+    const abs = path.join(__dirname, "public", rel);
+    if (!abs.startsWith(path.join(__dirname, "public"))) {
+      res.writeHead(403);
+      return res.end("Forbidden");
+    }
+    return serveFile(res, abs);
+  }
+
   res.writeHead(404);
   res.end("Not Found");
 });
