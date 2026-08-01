@@ -649,6 +649,19 @@
       .msg-wrapper:hover .msg-time {
         opacity: 1;
       }
+
+      /* Delivery receipt ticks — color only; visibility follows the timestamp.
+         Single ✓ (grey) = server received it. Double ✓✓ (green) = a recipient
+         rendered it. */
+      .msg-ticks {
+        margin-left: 3px;
+        font-size: 9px;
+        letter-spacing: -1px;
+        color: var(--text-light);
+      }
+      .msg-ticks.delivered {
+        color: #4a9e5c;
+      }
       /* Touch / small screens have no hover, so always show timestamps there.
          Desktop keeps the clean hover-to-reveal behaviour. */
       @media (max-width: 600px), (hover: none) {
@@ -2222,6 +2235,16 @@
       let isReconnecting = false; // BUG-FIX: prevents simultaneous reconnect loops
       let reconnectDelay = 2000; // starts at 2 s, backs off on repeat failures
       let isSubmitting = false; // BUG-FIX: guards against double-send on rapid clicks
+      let pingTimer = null; // app-level keep-alive so idle connections survive NAT / mobile sleep
+      let pongTimeout = null; // "close if nothing comes back" deadline set by each ping
+      let reconnectTimer = null; // pending reconnect, so wake-up can fire it immediately
+
+      // Delivery receipts: msgId → tick element for messages we sent.
+      // Single ✓ = server ACKed it, double ✓✓ = recipient rendered it.
+      const pendingTicks = new Map();
+      function genMsgId() {
+        return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      }
 
       // ── Reply state ───────────────────────────────────────────────
       let replyingTo = null; // { sender, text } when composing a reply
@@ -4258,7 +4281,7 @@
       // ═══════════════════════════════════════════════════════════
       //  CHAT RENDER
       // ═══════════════════════════════════════════════════════════
-      function renderMessage(sender, text, isMe, replyTo = null) {
+      function renderMessage(sender, text, isMe, replyTo = null, msgId = null) {
         const msgDiv = document.createElement("div");
         msgDiv.className = `msg-wrapper ${isMe ? "sent" : "received"}`;
         // Detect pure-emoji messages → render larger
@@ -4285,7 +4308,7 @@
             ${escapeHTML(text)}
           </div>
           <button class="reply-btn" title="Reply" aria-label="Reply to this message">↩</button>
-          <div class="msg-time">${getTimeString()}</div>`;
+          <div class="msg-time">${getTimeString()}${isMe ? '<span class="msg-ticks"></span>' : ""}</div>`;
 
         // Wire the reply button
         msgDiv.querySelector(".reply-btn").addEventListener("click", (e) => {
@@ -4295,6 +4318,9 @@
 
         chatMessages.appendChild(msgDiv);
         scrollToBottom();
+
+        // Register the tick element so receipts can flip it ✓ → ✓✓
+        if (isMe && msgId) pendingTicks.set(msgId, msgDiv.querySelector(".msg-ticks"));
       }
       function renderSystemMessage(text) {
         const div = document.createElement("div");
@@ -4327,20 +4353,25 @@
       // ── Send message ──────────────────────────────────────────────
       function handleSendMessage(text) {
         const reply = replyingTo; // capture before clearing
-        renderMessage(currentUser, text, true, reply);
+        const msgId = genMsgId();
+        renderMessage(currentUser, text, true, reply, msgId);
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "chat", text, replyTo: reply || undefined }));
+          ws.send(JSON.stringify({ type: "chat", text, replyTo: reply || undefined, msgId }));
         }
         messageInput.value = "";
         messageInput.classList.remove("has-text");
         cancelReply();
         clearTypingOnSend();
       }
-      function handleReceiveMessage(sender, text, replyTo = null) {
+      function handleReceiveMessage(sender, text, replyTo = null, msgId = null) {
         // If sender was in typing set, remove them now that the message arrived
         if (typingUsers.delete(sender)) renderTypingIndicator();
         renderMessage(sender, text, false, replyTo);
         showNotification(sender, text);
+        // We've rendered it — tell the sender so their ✓ can flip to ✓✓
+        if (msgId) {
+          wsSend({ type: "msg_delivered", msgId, to: sender });
+        }
       }
 
       // ═══════════════════════════════════════════════════════════
@@ -4374,11 +4405,36 @@
 
           socket.onopen = () => {
             reconnectDelay = 2000; // reset back-off on successful connection
+            // App-level keep-alive ("wake beacon"): the server's 30 s TCP ping
+            // requests a pong, but if the client never *sends* anything the NAT /
+            // mobile radios may still drop an idle-looking connection, and a dead
+            // half-open socket can linger undetected for minutes on mobile.
+            // Sending a lightweight ping every 25 s keeps the path alive and
+            // surfaces a real failure within one interval instead of at TCP timeout.
+            clearInterval(pingTimer);
+            clearTimeout(pongTimeout);
+            pingTimer = setInterval(() => {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "ping" }));
+                // Any traffic back within 15 s counts as life. If the socket
+                // silently died (mobile sleep, NAT drop), nothing comes back —
+                // close it ourselves so the normal reconnect path kicks in,
+                // instead of waiting minutes for a TCP timeout to notice.
+                clearTimeout(pongTimeout);
+                pongTimeout = setTimeout(() => {
+                  if (isChatActive && ws) { try { ws.close(); } catch (_) {} }
+                }, 15_000);
+              }
+            }, 25_000);
             resolve();
           };
 
           socket.onmessage = (event) => {
             if (socket !== ws) return; // stale socket — discard
+            // Any inbound traffic proves the link is alive — cancel the
+            // "close if silent" deadline our ping set.
+            clearTimeout(pongTimeout);
+            pongTimeout = null;
             try {
               const data = JSON.parse(event.data);
               switch (data.type) {
@@ -4395,8 +4451,24 @@
                   renderTypingIndicator();
                   break;
                 case "chat":
-                  handleReceiveMessage(data.username, data.text, data.replyTo || null);
+                  handleReceiveMessage(data.username, data.text, data.replyTo || null, data.msgId || null);
                   break;
+                // Server accepted our message → show single ✓
+                case "msg_ack": {
+                  const el = pendingTicks.get(data.msgId);
+                  if (el && !el.classList.contains("delivered")) el.textContent = "✓";
+                  break;
+                }
+                // A recipient rendered it → flip to double ✓✓
+                case "msg_delivered": {
+                  const el = pendingTicks.get(data.msgId);
+                  if (el) {
+                    el.textContent = "✓✓";
+                    el.classList.add("delivered");
+                    pendingTicks.delete(data.msgId); // terminal state — free the entry
+                  }
+                  break;
+                }
                 // ── Typing indicators ──
                 case "typing_start":
                   typingUsers.add(data.username);
@@ -4445,31 +4517,10 @@
           // BUG-FIX: only one reconnect loop at a time (isReconnecting guard)
           socket.onclose = () => {
             if (socket !== ws) return; // already replaced
+            clearTimeout(pongTimeout);
+            pongTimeout = null;
             if (!isChatActive) return; // intentional disconnect
-            if (isReconnecting) return; // already retrying
-
-            isReconnecting = true;
-            renderSystemMessage(
-              `Connection lost. Reconnecting in ${reconnectDelay / 1000}s…`,
-            );
-
-            setTimeout(() => {
-              if (!isChatActive) {
-                isReconnecting = false;
-                return;
-              }
-              connectWebSocket()
-                .then(() => {
-                  isReconnecting = false;
-                  renderSystemMessage("Reconnected ✓");
-                })
-                .catch(() => {
-                  // exponential back-off, cap at 30 s
-                  reconnectDelay = Math.min(reconnectDelay * 2, 30_000);
-                  isReconnecting = false;
-                  if (isChatActive) socket.onclose(); // retry
-                });
-            }, reconnectDelay);
+            scheduleReconnect();
           };
 
           socket.onerror = () => {
@@ -4477,6 +4528,63 @@
           };
         });
       }
+
+      // ── Reconnect helpers ───────────────────────────────────────────
+      // scheduleReconnect backs off and retries in a loop; attemptReconnectNow
+      // wakes it instantly (tab foreground / network back).
+      function scheduleReconnect() {
+        if (!isChatActive) return;
+        if (isReconnecting) return; // already retrying
+        isReconnecting = true;
+        renderSystemMessage(
+          `Connection lost. Reconnecting in ${reconnectDelay / 1000}s…`,
+        );
+        reconnectTimer = setTimeout(runReconnectAttempt, reconnectDelay);
+      }
+
+      function runReconnectAttempt() {
+        if (!isChatActive) {
+          isReconnecting = false;
+          return;
+        }
+        connectWebSocket()
+          .then(() => {
+            isReconnecting = false;
+            renderSystemMessage("Reconnected ✓");
+          })
+          .catch(() => {
+            // exponential back-off, cap at 30 s; keep looping until back
+            reconnectDelay = Math.min(reconnectDelay * 2, 30_000);
+            if (isChatActive) {
+              reconnectTimer = setTimeout(runReconnectAttempt, reconnectDelay);
+            } else {
+              isReconnecting = false;
+            }
+          });
+      }
+
+      function attemptReconnectNow() {
+        if (!isChatActive) return;
+        // Still connected (or mid-handshake) — nothing to do
+        if (ws && ws.readyState === WebSocket.OPEN) return;
+        if (ws && ws.readyState === WebSocket.CONNECTING) return;
+
+        if (isReconnecting) {
+          // A retry is pending — bring it forward instead of waiting out the back-off
+          clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(runReconnectAttempt, 250);
+        } else {
+          scheduleReconnect();
+        }
+      }
+
+      // Wake-up probes: when the tab or network comes back to life, don't sit
+      // waiting for TCP/heartbeat to notice — check the socket right away.
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) attemptReconnectNow();
+      });
+      window.addEventListener("pageshow", attemptReconnectNow);
+      window.addEventListener("online", attemptReconnectNow);
 
       // ── Send helper ───────────────────────────────────────────────
       function wsSend(data) {
@@ -5383,6 +5491,7 @@
           isChatActive = true;
           messageInput.focus();
           chatMessages.innerHTML = "";
+          pendingTicks.clear(); // fresh room — drop any stale receipt handles
           spawnParticles();
           renderDateDivider();
           renderWelcomeCard(currentChannel, currentUser);
@@ -5420,6 +5529,15 @@
         isChatActive = false;
         isReconnecting = false;
         endCall(false); // hang up any in-progress call
+
+        // Stop keep-alive and any pending reconnect attempt
+        clearInterval(pingTimer);
+        pingTimer = null;
+        clearTimeout(pongTimeout);
+        pongTimeout = null;
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+        pendingTicks.clear();
 
         if (ws) {
           ws.onclose = null;

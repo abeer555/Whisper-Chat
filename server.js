@@ -146,9 +146,31 @@ wss.on("connection", (ws, req) => {
     try {
       const msg = JSON.parse(data.toString());
 
-      // Chat: broadcast to everyone else in the room
+      // App-level keep-alive: keep the wire busy and confirm liveness.
+      if (msg.type === "ping") {
+        if (ws.readyState === 1) ws.send(JSON.stringify({ type: "pong" }));
+        return;
+      }
+
+      // Chat: broadcast to everyone else in the room, then ACK back to sender
       if (msg.type === "chat") {
-        broadcast(roomKey, { type: "chat", username, text: msg.text, replyTo: msg.replyTo || null }, ws);
+        broadcast(roomKey, { type: "chat", username, text: msg.text, replyTo: msg.replyTo || null, msgId: msg.msgId }, ws);
+
+        // ACK the sender so the client can render a single ✓ (server received it).
+        if (msg.msgId && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: "msg_ack", msgId: msg.msgId }));
+        }
+        return;
+      }
+
+      // Delivery receipt: a recipient tells the room they've rendered msgId.
+      // Relay to the original sender so their UI can flip ✓ → ✓✓.
+      if (msg.type === "msg_delivered" && msg.msgId && msg.to) {
+        sendToUser(roomKey, username, msg.to, {
+          type: "msg_delivered",
+          msgId: msg.msgId,
+          from: username,
+        });
         return;
       }
 
