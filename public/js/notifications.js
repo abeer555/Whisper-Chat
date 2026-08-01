@@ -10,6 +10,6 @@
         if (Notification.permission !== "granted") return;
         if (!document.hidden) return; // only when the tab is in the background
         try {
-          new Notification(`Matcha Chat — ${sender}`, { body: text, silent: false });
+          new Notification(`Whisper Chat — ${sender}`, { body: text, silent: false });
         } catch (_) {}
       }

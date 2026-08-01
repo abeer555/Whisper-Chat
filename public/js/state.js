@@ -17,6 +17,11 @@
       // ── Delivery receipts (msgId → tick el). Single ✓ = server ACKed it; ✓✓ = peer rendered it.
       const pendingTicks = new Map();
 
+      // ── Outbound message queue ──
+      // Messages the user tried to send while the socket was down. Flushed
+      // in-order on the next successful reconnect so nothing is silently lost.
+      const outboxQueue = [];
+
       // ── Presence ──
       const onlineUsers = new Map(); // username → { online, el }
 

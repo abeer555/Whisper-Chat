@@ -7,17 +7,17 @@
       // ═══════════════════════════════════════════════════════════
       const BG_PRESETS = [
         { label: "Default",    value: "" },
-        { label: "Sage",       value: "linear-gradient(135deg,#e8f5e9 0%,#f1f8e9 100%)" },
-        { label: "Peach",      value: "linear-gradient(135deg,#fff3e0 0%,#fce4ec 100%)" },
-        { label: "Ocean",      value: "linear-gradient(135deg,#e3f2fd 0%,#e8eaf6 100%)" },
-        { label: "Rose",       value: "linear-gradient(135deg,#fce4ec 0%,#f8bbd9 100%)" },
-        { label: "Lavender",   value: "linear-gradient(135deg,#ede7f6 0%,#e8eaf6 100%)" },
-        { label: "Mint",       value: "linear-gradient(135deg,#e0f2f1 0%,#b2dfdb 100%)" },
-        { label: "Sunset",     value: "linear-gradient(135deg,#ff9a9e 0%,#fecfef 50%,#fecfef 100%)" },
-        { label: "Nordic",     value: "linear-gradient(135deg,#2d3561 0%,#a16bfe 100%)" },
-        { label: "Midnight",   value: "linear-gradient(135deg,#0f0c29 0%,#302b63 50%,#24243e 100%)" },
-        { label: "Forest",     value: "linear-gradient(135deg,#134e5e 0%,#71b280 100%)" },
-        { label: "Pure White", value: "#ffffff" },
+        { label: "Bistre",     value: "#261606" },
+        { label: "Espresso",   value: "linear-gradient(135deg,#1a0f04 0%,#3d2a10 100%)" },
+        { label: "Aureolin",   value: "linear-gradient(135deg,#3d2a10 0%,#8a7408 100%)" },
+        { label: "Sunset",     value: "linear-gradient(135deg,#2a1810 0%,#6b2d10 100%)" },
+        { label: "Forest",     value: "linear-gradient(135deg,#14210f 0%,#2b3d1a 100%)" },
+        { label: "Ocean",      value: "linear-gradient(135deg,#0d1820 0%,#2a3d4a 100%)" },
+        { label: "Plum",       value: "linear-gradient(135deg,#1a1420 0%,#3b2d4a 100%)" },
+        { label: "Ember",      value: "linear-gradient(135deg,#20100a 0%,#4a2a1a 100%)" },
+        { label: "Slate",      value: "linear-gradient(135deg,#161a20 0%,#2b323d 100%)" },
+        { label: "Midnight",   value: "linear-gradient(135deg,#0a0714 0%,#1f1a33 100%)" },
+        { label: "Pure Black", value: "#000000" },
       ];
 
       const bgPickerPanel  = document.getElementById("bg-picker-panel");
@@ -26,25 +26,23 @@
       const bgCustomInput  = document.getElementById("bg-custom-input");
       const chatMessagesEl = document.getElementById("chat-messages");
 
-      let activeBgValue = localStorage.getItem("matcha-bg") || "";
+      let activeBgValue = localStorage.getItem("whisper-bg") || "";
 
       function applyBackground(value, fromSwatch = false) {
         activeBgValue = value;
         if (value === "") {
           chatMessagesEl.style.removeProperty("background");
           chatMessagesEl.style.removeProperty("background-color");
-        } else if (value.startsWith("#")) {
-          chatMessagesEl.style.background = value;
         } else {
           chatMessagesEl.style.background = value;
         }
-        localStorage.setItem("matcha-bg", value);
+        localStorage.setItem("whisper-bg", value);
         // Update swatch active states
         bgSwatchGrid.querySelectorAll(".bg-swatch").forEach((el) => {
           el.classList.toggle("active", el.dataset.value === value);
         });
         if (!fromSwatch && !value.startsWith("linear")) {
-          bgCustomInput.value = value || "#f1f5f2";
+          bgCustomInput.value = value || "#261606";
         }
       }
 
@@ -55,7 +53,7 @@
         swatch.className = "bg-swatch" + (activeBgValue === value ? " active" : "");
         swatch.title = label;
         swatch.dataset.value = value;
-        const bg = value || "linear-gradient(135deg,#f1f5f2 0%,#e8f0ea 100%)";
+        const bg = value || "#261606";
         swatch.style.background = bg;
         swatch.innerHTML = `<span class="bg-swatch-check">✓</span>`;
         swatch.addEventListener("click", () => {

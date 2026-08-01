@@ -1,5 +1,5 @@
 /**
- * Matcha Chat – Ephemeral WebSocket Relay Server
+ * Whisper Chat – Ephemeral WebSocket Relay Server
  *
  * Zero database. Zero persistence. Rooms live in memory and
  * are destroyed the instant the last user disconnects.
@@ -290,6 +290,6 @@ wss.on("connection", (ws, req) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`\n🍵 Matcha Chat server running on http://localhost:${PORT}\n`);
+  console.log(`\n💬 Whisper Chat server running on http://localhost:${PORT}\n`);
   console.log(`   No database. No logs. Rooms are temporary.\n`);
 });

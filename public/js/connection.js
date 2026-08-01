@@ -38,6 +38,8 @@
                 }, 15_000);
               }
             }, 25_000);
+            // Flush anything that was queued while the socket was down.
+            flushOutboxQueue();
             resolve();
           };
 
@@ -158,9 +160,13 @@
       }
 
       // Wake-up: when the tab or network comes back, don't wait for the
-      // scheduled retry — try immediately.
+      // scheduled retry — try immediately. IMPORTANT: only trigger when
+      // the socket is actually dead. Don't proactively close a live
+      // connection — that creates a window where messages routed to the
+      // dying socket (which the server is mid-evicting) are lost.
       function attemptReconnectNow() {
         if (!isChatActive) return;
+        // If the socket is still OPEN, everything is fine — don't touch it.
         if (ws && ws.readyState === WebSocket.OPEN) return;
         if (ws && ws.readyState === WebSocket.CONNECTING) return;
         if (isReconnecting) {
@@ -176,6 +182,21 @@
 
       function wsSend(data) {
         if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
+      }
+
+      // Drain anything staged while the socket was dead.
+      function flushOutboxQueue() {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        while (outboxQueue.length > 0) {
+          const msg = outboxQueue.shift();
+          try {
+            ws.send(JSON.stringify(msg));
+          } catch (err) {
+            // Push it back to the front and stop — we'll try again on next open.
+            outboxQueue.unshift(msg);
+            return;
+          }
+        }
       }
 
       function teardownConnection() {

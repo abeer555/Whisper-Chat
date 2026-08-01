@@ -45,17 +45,19 @@
             <span class="file-preview-size">${formatBytes(file.size)}</span>
             <button class="file-preview-remove" id="file-preview-remove" title="Remove">✕</button>
           </div>`;
-        filePreviewBar.classList.add("show");
+        filePreviewBar.classList.add("visible");
         document.getElementById("file-preview-remove")
           .addEventListener("click", clearStagedFile);
+        updateSendReady();
       }
 
       function clearStagedFile() {
         stagedFile.file = null;
         stagedFile.dataURL = null;
         stagedFile.overrides = null;
-        filePreviewBar.classList.remove("show");
+        filePreviewBar.classList.remove("visible");
         filePreviewBar.innerHTML = "";
+        updateSendReady();
       }
 
       function handleSendFile() {
@@ -68,8 +70,13 @@
         };
         // Render locally for the sender
         renderFileMessage(currentUser, payload, true);
+        const envelope = { type: "file", ...payload };
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "file", ...payload }));
+          ws.send(JSON.stringify(envelope));
+        } else {
+          outboxQueue.push(envelope);
+          renderSystemMessage("⚠️ Not connected — file queued until we reconnect.");
+          scheduleReconnect();
         }
         clearStagedFile();
       }
@@ -106,10 +113,10 @@
 
       function openLightbox(src) {
         lightboxImg.src = src;
-        lightbox.classList.add("show");
+        lightbox.classList.add("visible");
       }
       function closeLightbox() {
-        lightbox.classList.remove("show");
+        lightbox.classList.remove("visible");
         lightboxImg.src = "";
       }
       lightboxClose.addEventListener("click", closeLightbox);

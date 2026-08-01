@@ -45,20 +45,32 @@
         const reply = replyingTo;
         const msgId = genMsgId();
         renderMessage(currentUser, text, true, reply, msgId);
+        const payload = { type: "chat", text, replyTo: reply || undefined, msgId };
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "chat", text, replyTo: reply || undefined, msgId }));
+          ws.send(JSON.stringify(payload));
+        } else {
+          // Socket isn't alive — queue so we don't silently drop on the floor.
+          // The reconnect path flushes the queue instead of losing the message.
+          outboxQueue.push(payload);
+          renderSystemMessage("⚠️ Not connected — message queued until we reconnect.");
+          scheduleReconnect();
         }
         messageInput.value = "";
-        messageInput.classList.remove("has-text");
+        updateSendReady();
         cancelReply();
         clearTypingOnSend();
       }
 
       function handleReceiveMessage(sender, text, replyTo = null, msgId = null) {
-        if (typingUsers.delete(sender)) renderTypingIndicator();
-        renderMessage(sender, text, false, replyTo);
-        showNotification(sender, text);
-        if (msgId) wsSend({ type: "msg_delivered", msgId, to: sender });
+        try {
+          if (typingUsers.delete(sender)) renderTypingIndicator();
+          renderMessage(sender, text, false, replyTo);
+          showNotification(sender, text);
+          if (msgId) wsSend({ type: "msg_delivered", msgId, to: sender });
+        } catch (err) {
+          // Never let a render bug eat the message — log so we can diagnose.
+          console.error("[chat] failed to render incoming message:", err, { sender, text });
+        }
       }
 
       // ── Typing (sender side) ──
@@ -80,3 +92,22 @@
         if (ws && ws.readyState === WebSocket.OPEN) wsSend({ type: "typing_stop" });
         clearTimeout(clearTypingOnSend._t);
       }
+
+      // ── Send-button enable/disable — text OR a staged file is enough ──
+      // The send button lives OUTSIDE #chat-form (a sibling using
+      // form="chat-form"), so query it via document, not the form.
+      function updateSendReady() {
+        const hasText = messageInput.value.trim().length > 0;
+        const hasFile = !!(stagedFile && stagedFile.file);
+
+        messageInput.classList.toggle("has-text", hasText);
+
+        const btnSend = document.querySelector(".btn-send");
+        if (btnSend) btnSend.disabled = !(hasText || hasFile);
+
+        const btnAttach = document.getElementById("btn-attach");
+        if (btnAttach) btnAttach.classList.toggle("has-file", hasFile);
+      }
+
+      // Keep the send button state in sync as the user types.
+      messageInput.addEventListener("input", updateSendReady);

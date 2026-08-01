@@ -1359,14 +1359,11 @@
         }
         emojiCategoryLabel.textContent = "Search results";
         const all = EMOJI_CATEGORIES.flatMap((c) => c.emojis);
-        // Simple filter by checking if the emoji matches a keyword mapping (use all for now)
-        renderEmojiGrid(all.filter(() => true).slice(0, 80)); // show all when query is present
-        // Better: filter by name via a lightweight lookup
         const results = all.filter((e) => {
           const name = EMOJI_NAMES[e];
           return name ? name.includes(q) : false;
         });
-        renderEmojiGrid(results.length > 0 ? results : all.slice(0, 64));
+        renderEmojiGrid(results);
       });
 
       // Minimal emoji name map for search (key emojis only)

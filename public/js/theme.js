@@ -1,15 +1,15 @@
       "use strict";
 
-      const THEME_KEY = "matcha-theme";
+      // The Aureolin/Bistre palette is dark-by-default; "light" theme is a
+      // legacy toggle kept for users who prefer it.
+      const THEME_KEY = "whisper-theme";
 
       function setTheme(t) {
         document.documentElement.setAttribute("data-theme", t);
         localStorage.setItem(THEME_KEY, t);
-        themeToggle.textContent = t === "dark" ? "🌙" : "☀️";
       }
       function initTheme() {
-        setTheme(localStorage.getItem(THEME_KEY) ||
-          (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+        setTheme(localStorage.getItem(THEME_KEY) || "dark");
       }
       themeToggle.addEventListener("click", () => {
         setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");

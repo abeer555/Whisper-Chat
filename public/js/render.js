@@ -23,7 +23,7 @@
       function renderWelcomeCard(channel, user) {
         const div = document.createElement("div");
         div.className = "welcome-card";
-        div.innerHTML = `<div class="welcome-emoji">🍵</div>
+        div.innerHTML = `<div class="welcome-emoji">💬</div>
           <h3>Welcome to #${escapeHTML(channel)}</h3>
           <p>You've joined as <strong>@${escapeHTML(user)}</strong>. Say hello to the room!</p>`;
         chatMessages.appendChild(div);
@@ -50,16 +50,10 @@
         typingIndicatorRow.scrollIntoView({ block: "nearest", behavior: "smooth" });
       }
 
-      function spawnParticles() {
-        const colors = ["#7bc47f", "#4a9e5c", "#a8d5a2", "#d4f0d0", "#69b56f"];
-        for (let i = 0; i < 22; i++) {
-          const p = document.createElement("div");
-          p.className = "chat-particle";
-          const s = Math.random() * 6 + 3;
-          p.style.cssText = `width:${s}px;height:${s}px;background:${colors[~~(Math.random() * colors.length)]};left:${Math.random() * 100}%;bottom:${Math.random() * 30}%;animation-duration:${Math.random() * 12 + 10}s;animation-delay:${Math.random() * 10}s`;
-          chatMessages.appendChild(p);
-        }
-      }
+      // spawnParticles / ambient effects removed — they caused layout jank
+      // and window shift. Kept as a no-op stub for backwards compatibility
+      // with any caller that hasn't been updated yet.
+      function spawnParticles() {}
 
       function clearChatMessages() {
         chatMessages.innerHTML = "";
